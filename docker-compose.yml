@@ -3,5 +3,13 @@ services:
     build: .
     command: ["BTCUSDT", "ETHUSDT", "SOLUSDT", "PEPEUSDT", "EURUSDT"]
     restart: unless-stopped
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/status')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
     volumes:
       - ./logs:/app/logs
