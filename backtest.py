@@ -116,11 +116,11 @@ def run(csv_path, risk=0.10, threshold=8.0, window=10, atr_period=14, start=100.
         for tag, price in seq:
             if active:
                 if active["dir"] == "sell":
-                    if price <= active["tp"]: result = "win"; break
                     if price >= active["sl"]: result = "loss"; break
+                    if price <= active["tp"]: result = "win"; break
                 else:
-                    if price >= active["tp"]: result = "win"; break
                     if price <= active["sl"]: result = "loss"; break
+                    if price >= active["tp"]: result = "win"; break
             else:
                 consumed = []
                 for sig in pending:

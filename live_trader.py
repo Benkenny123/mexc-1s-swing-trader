@@ -14,7 +14,6 @@ Usage:
 import requests
 import time
 import sys
-import json
 import signal
 import math
 import os
@@ -24,7 +23,7 @@ from collections import deque
 
 MEXC_BASE = "https://api.mexc.com"
 SPREAD = 0.0
-_states_ref = []
+
 ATR_PERIOD = 14
 SWING_WINDOW = 10
 ATR_THRESH = 8.0
@@ -34,7 +33,6 @@ START_BAL = 100.0
 running = True
 balance = START_BAL
 all_trades_log = []
-_all_states = []
 
 
 # ─── Helpers ─────────────────────────────────────────────────────
@@ -233,18 +231,18 @@ class SymbolState:
         t = self.active_trade
         if t:
             if t["dir"] == "sell":
-                if price <= t["tp"]:
-                    close_trade(self, "win", t["tp"])
-                    return True
                 if price >= t["sl"]:
                     close_trade(self, "loss", t["sl"])
                     return True
-            else:
-                if price >= t["tp"]:
+                if price <= t["tp"]:
                     close_trade(self, "win", t["tp"])
                     return True
+            else:
                 if price <= t["sl"]:
                     close_trade(self, "loss", t["sl"])
+                    return True
+                if price >= t["tp"]:
+                    close_trade(self, "win", t["tp"])
                     return True
             return False
 
@@ -405,55 +403,6 @@ def print_footer(states, start_time, poll_count):
     print()
 
 
-def start_status_server_thread():
-    import http.server, json, socketserver, threading
-    from http.server import BaseHTTPRequestHandler
-    PORT = 8080
-    class H(BaseHTTPRequestHandler):
-        def do_GET(self):
-            if self.path in ("/status", "/"):
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Access-Control-Allow-Origin", "*")
-                self.end_headers()
-                import __main__ as m
-                stats = m.compute_stats()
-                syms = []
-                for s in m._all_states:
-                    syms.append({
-                        "symbol": s.symbol, "pip": s.pip,
-                        "candles": s.candle_counter, "signals": s.signal_count,
-                        "active": s.active_trade is not None,
-                        "in_trade": {
-                            "dir": s.active_trade["dir"],
-                            "entry": s.active_trade["entry"],
-                            "tp": s.active_trade["tp"],
-                            "sl": s.active_trade["sl"],
-                            "dist_pips": s.active_trade["dist_pips"],
-                            "atr_pips": s.active_trade["atr_pips"],
-                            "dist_atr": s.active_trade["dist_atr"],
-                        } if s.active_trade else None,
-                    })
-                body = json.dumps({
-                    "status": "running",
-                    "balance": m.balance,
-                    "start_balance": m.START_BAL,
-                    "growth_pct": (m.balance / m.START_BAL - 1) * 100 if m.START_BAL > 0 else 0,
-                    "trades": stats["trades"],
-                    "win_rate": round(stats["wr"], 1),
-                    "sharpe": round(stats["sharpe"], 2),
-                    "symbols": syms,
-                })
-                self.wfile.write(body.encode())
-            else:
-                self.send_response(404); self.end_headers()
-        def log_message(self, *a): pass
-    try:
-        with socketserver.TCPServer(("0.0.0.0", PORT), H) as srv:
-            srv.serve_forever()
-    except OSError as e:
-        print(f"  [HTTP server] {e}", file=sys.stderr)
-
 def main():
     global running, SYMBOLS, PIP, ATR_THRESH, RISK, SWING_WINDOW, ATR_PERIOD, START_BAL, balance
 
@@ -488,11 +437,7 @@ def main():
     # Init symbol states
     states = [SymbolState(sym) for sym in symbols]
 
-    # Start HTTP status server thread
-    global _all_states
-    _all_states = states
-    t = threading.Thread(target=start_status_server_thread, daemon=True)
-    t.start()
+
 
     print("=" * 80)
     print(f"  MEXC 1s Multi-Asset Swing Trader")
