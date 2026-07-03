@@ -63,6 +63,20 @@ def fmt_dt(ms):
     return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%H:%M:%S.%f")[:-3]
 
 
+
+def fetch_pip(sym):
+    """Get minimum price tick from MEXC exchange info."""
+    try:
+        r = requests.get(f"{MEXC_BASE}/api/v3/exchangeInfo", timeout=10)
+        r.raise_for_status()
+        for s in r.json()["symbols"]:
+            if s["symbol"] == sym:
+                return 10 ** -s["quotePrecision"]
+    except Exception:
+        pass
+    # Fallback by price level
+    return 0.01
+
 def fetch_price(sym):
     try:
         r = requests.get(f"{MEXC_BASE}/api/v3/ticker/price",
@@ -410,14 +424,7 @@ def main():
 
     signal.signal(signal.SIGINT, handle_sigint)
 
-    if "PEPE" in SYMBOL:
-        PIP = 0.00000001
-    elif "EUR" in SYMBOL:
-        PIP = 0.0001
-    elif "DOGE" in SYMBOL:
-        PIP = 0.00001
-    else:
-        PIP = 0.01
+    PIP = fetch_pip(SYMBOL)
 
     print("=" * 80)
     print(f"  MEXC 1s Swing Trader — {SYMBOL}")

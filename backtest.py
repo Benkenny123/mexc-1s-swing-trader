@@ -32,11 +32,17 @@ def run(csv_path, risk=0.10, threshold=8.0, window=10, atr_period=14, start=100.
     C = np.array([r["c"] for r in rows])
     O = np.array([r["o"] for r in rows])
 
-    # PIP from price level
-    px = C[n//2]
-    if px < 0.001: pip = 0.00000001
-    elif px < 1.0: pip = 0.0001
-    else: pip = 0.01
+    # PIP from MEXC exchange info (pass symbol or default)
+    pip = 0.01
+    try:
+        import requests as _req
+        _r = _req.get("https://api.mexc.com/api/v3/exchangeInfo", timeout=10)
+        for _s in _r.json()["symbols"]:
+            if _s["symbol"] == csv_path.split("_")[0].upper():
+                pip = 10 ** -_s["quotePrecision"]
+                break
+    except Exception:
+        pass
 
     # ATR
     tr = np.maximum(H - L, np.maximum(np.abs(H - np.roll(C, 1)), np.abs(L - np.roll(C, 1))))
