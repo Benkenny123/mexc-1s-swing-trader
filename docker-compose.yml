@@ -1,0 +1,7 @@
+services:
+  swing-trader:
+    build: .
+    command: ["BTCUSDT", "ETHUSDT", "SOLUSDT", "PEPEUSDT", "EURUSDT"]
+    restart: unless-stopped
+    volumes:
+      - ./logs:/app/logs
