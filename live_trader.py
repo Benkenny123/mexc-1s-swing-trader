@@ -261,34 +261,39 @@ class SymbolState:
         still = []
         for sig in self.pending_signals:
             d = sig["dir"]
-            filled = (d == "sell" and price <= sig["entry"]) or \
-                     (d == "buy" and price >= sig["entry"])
+
+            # Limit order: track approach direction
+            # Buy limit fills when price DROPS to entry from above
+            # Sell limit fills when price RISES to entry from below
+            if d == "buy":
+                if price > sig["entry"]:
+                    sig["_seen_above"] = True
+                filled = sig.get("_seen_above") and price <= sig["entry"]
+            else:
+                if price < sig["entry"]:
+                    sig["_seen_below"] = True
+                filled = sig.get("_seen_below") and price >= sig["entry"]
+
+            # Blown: price hit SL before limit filled
             blown = (d == "sell" and price >= sig["sl"]) or \
                     (d == "buy" and price <= sig["sl"])
             if blown:
                 continue
             if filled:
-                # Recalc TP/SL around the fill price so 1:1 RR is maintained
-                _dist = sig["dist"]
-                if sig["dir"] == "sell":
-                    _tp = price - _dist
-                    _sl = price + _dist
-                else:
-                    _tp = price + _dist
-                    _sl = price - _dist
+                # LIMIT ORDER: fill at exact pivot entry, use signal's TP/SL
                 self.active_trade = {
-                    "dir": sig["dir"], "entry": price,
-                    "tp": _tp, "sl": _sl,
+                    "dir": sig["dir"], "entry": sig["entry"],
+                    "tp": sig["tp"], "sl": sig["sl"],
                     "dist": sig["dist"], "dist_pips": sig["dist_pips"],
                     "atr_pips": sig["atr_pips"], "dist_atr": sig["dist_atr"],
                     "symbol": sig["symbol"], "open_time": now_ts(),
                 }
-                log_entry(sig, price)
+                log_entry(sig, sig["entry"])
                 # Check if TP hit immediately at fill
-                if (d == "sell" and price <= _tp) or \
-                   (d == "buy" and price >= _tp):
+                if (d == "sell" and price <= sig["tp"]) or \
+                   (d == "buy" and price >= sig["tp"]):
                     self.pending_signals = still
-                    close_trade(self, "win", _tp)
+                    close_trade(self, "win", sig["tp"])
                     return True
                 self.pending_signals = still
                 return False
@@ -310,16 +315,9 @@ def log_signal(sig):
 
 def log_entry(sig, price):
     ts = fmt_dt(now_ts())
-    # Show the actual TP/SL that will be used (recalculated around fill price)
-    _dist = sig["dist"]
-    if sig["dir"] == "sell":
-        _tp = price - _dist
-        _sl = price + _dist
-    else:
-        _tp = price + _dist
-        _sl = price - _dist
+    # Limit order: entry at signal pivot, TP/SL from signal (1:1 around pivot)
     print(f"  🚀 {ts} {sig['symbol']:>10s} ENTRY {sig['dir']:>5s} @ {fmt_price(price)} "
-          f"TP={fmt_price(_tp)} SL={fmt_price(_sl)} "
+          f"TP={fmt_price(sig['tp'])} SL={fmt_price(sig['sl'])} "
           f"risk={RISK * 100:.0f}%")
 
 
