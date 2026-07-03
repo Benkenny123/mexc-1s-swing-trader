@@ -222,9 +222,12 @@ class SymbolState:
                     "dir": d, "atr_pips": ap, "dist_pips": dp,
                     "dist_atr": dp / ap, "symbol": self.symbol,
                 }
-                self.pending_signals.append(sig)
-                self.signal_count += 1
-                log_signal(sig)
+                # Dedup: skip if same dir+entry already pending
+                exists = any(s["dir"] == d and abs(s["entry"] - entry) < 0.001 for s in self.pending_signals)
+                if not exists:
+                    self.pending_signals.append(sig)
+                    self.signal_count += 1
+                    log_signal(sig)
 
     # ── Position check ──
 
@@ -307,8 +310,16 @@ def log_signal(sig):
 
 def log_entry(sig, price):
     ts = fmt_dt(now_ts())
+    # Show the actual TP/SL that will be used (recalculated around fill price)
+    _dist = sig["dist"]
+    if sig["dir"] == "sell":
+        _tp = price - _dist
+        _sl = price + _dist
+    else:
+        _tp = price + _dist
+        _sl = price - _dist
     print(f"  🚀 {ts} {sig['symbol']:>10s} ENTRY {sig['dir']:>5s} @ {fmt_price(price)} "
-          f"TP={fmt_price(sig['tp'])} SL={fmt_price(sig['sl'])} "
+          f"TP={fmt_price(_tp)} SL={fmt_price(_sl)} "
           f"risk={RISK * 100:.0f}%")
 
 
