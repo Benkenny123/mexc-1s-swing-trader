@@ -315,9 +315,13 @@ def print_status(states):
     stats = compute_stats()
     growth = (balance / START_BAL - 1) * 100
     active = sum(1 for s in states if s.active_trade)
+    candles = sum(s.candle_counter for s in states)
     s = f"  [{fmt_dt(now_ts())}]  ${balance:<8.2f}  {stats['trades']:>3d}tr  "
     s += f"{stats['wr']:>5.1f}%  Sharpe={stats['sharpe']:>5.1f}  "
-    s += f"Growth={growth:+7.2f}%  Active={active}  Symbols={len(states)}"
+    s += f"Growth={growth:+7.2f}%  {candles}c  Active={active}  {len(states)}sym"
+    # Show per-symbol break
+    for st in states:
+        s += f"  {st.symbol}={st.candle_counter}c/{st.signal_count}s"
     print(s)
 
 
@@ -408,7 +412,7 @@ def print_footer(states, start_time, poll_count):
 
 
 def main():
-    global running, SYMBOLS, PIP, ATR_THRESH, RISK, SWING_WINDOW, ATR_PERIOD, START_BAL, balance
+    global running, SYMBOLS, PIP, ATR_THRESH, RISK, SWING_WINDOW, ATR_PERIOD, START_BAL, balance, MIN_DIFF, _all_states, MIN_DIFF
 
     if len(sys.argv) < 2:
         print(f"Usage: {sys.argv[0]} SYMBOL1 [SYMBOL2 ...] [options]")
