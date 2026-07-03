@@ -276,8 +276,10 @@ class SymbolState:
                 # Check if TP hit immediately at fill
                 if (d == "sell" and price <= sig["tp"]) or \
                    (d == "buy" and price >= sig["tp"]):
+                    self.pending_signals = still
                     close_trade(self, "win", sig["tp"])
                     return True
+                self.pending_signals = still
                 return False
             still.append(sig)
 
