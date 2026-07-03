@@ -13,7 +13,7 @@ import sys, json, csv
 import numpy as np
 from datetime import datetime, timezone
 
-def run(csv_path, risk=0.10, threshold=8.0, window=10, atr_period=14, start=100.0):
+def run(csv_path, risk=0.10, threshold=8.0, window=10, atr_period=14, start=100.0, min_diff=0.0):
     # Load data
     rows = []
     with open(csv_path) as f:
@@ -105,7 +105,7 @@ def run(csv_path, risk=0.10, threshold=8.0, window=10, atr_period=14, start=100.
             for s in sig_map[idx]:
                 ap = atr[idx] / pip
                 dp = s["dist"] / pip
-                if ap > 0 and dp / ap >= threshold:
+                if ap > 0 and dp / ap >= threshold and s["dist"] >= min_diff:
                     sc = dict(s)
                     sc.update({"atr_pips": ap, "dist_pips": dp, "dist_atr": dp/ap})
                     pending.append(sc)
@@ -164,16 +164,27 @@ if __name__ == "__main__":
         print(__doc__); sys.exit(1)
 
     csv_path = sys.argv[1]
-    risk = float(sys.argv[3]) if len(sys.argv) > 3 and sys.argv[2] == "--risk" else 0.10
-    thresh = float(sys.argv[5]) if len(sys.argv) > 5 and sys.argv[4] == "--threshold" else 8.0
-    window = int(sys.argv[7]) if len(sys.argv) > 7 and sys.argv[6] == "--window" else 10
+    risk, thresh, window, min_diff = 0.10, 8.0, 10, 0.0
+    i = 2
+    while i < len(sys.argv):
+        a = sys.argv[i]
+        if a == "--risk" and i + 1 < len(sys.argv):
+            risk = float(sys.argv[i + 1]); i += 2
+        elif a == "--threshold" and i + 1 < len(sys.argv):
+            thresh = float(sys.argv[i + 1]); i += 2
+        elif a == "--window" and i + 1 < len(sys.argv):
+            window = int(sys.argv[i + 1]); i += 2
+        elif a == "--min-diff" and i + 1 < len(sys.argv):
+            min_diff = float(sys.argv[i + 1]); i += 2
+        else:
+            i += 1
 
     print("="*60)
     print(f"  Swing Pattern Backtest — {csv_path}")
-    print(f"  Risk: {risk*100:.0f}%  Threshold: {thresh}x  Window: {window}s")
+    print("  Risk: {:.0f}%  Threshold: {}x  Window: {}s  MinDiff: ${:.0f}".format(risk*100, thresh, window, min_diff))
     print("="*60)
 
-    trades, final, pivots, n_sigs = run(csv_path, risk=risk, threshold=thresh, window=window)
+    trades, final, pivots, n_sigs = run(csv_path, risk=risk, threshold=thresh, window=window, min_diff=min_diff)
 
     if not trades:
         print("  No trades generated.")
@@ -204,6 +215,8 @@ if __name__ == "__main__":
             pf = abs(sum(t["pnl_pct"] for t in wins) / sum(t["pnl_pct"] for t in losses))
             print(f"  PF:       {pf:.2f}")
 
+        all_diffs = [abs(t["entry"] - t["exit"]) for t in trades]
+        print(f"  AvgPriceDiff: ${np.mean(all_diffs):.2f}  (min=${np.min(all_diffs):.2f}  max=${np.max(all_diffs):.2f})")
         print(f"  AvgDist:  {np.mean([t['dist_pips'] for t in trades]):.1f}p")
         print(f"  AvgATR:   {np.mean([t['atr_pips'] for t in trades]):.1f}p")
 

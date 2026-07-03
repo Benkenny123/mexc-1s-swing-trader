@@ -27,6 +27,7 @@ SPREAD = 0.0
 ATR_PERIOD = 14
 SWING_WINDOW = 10
 ATR_THRESH = 8.0
+MIN_DIFF = 0.0
 RISK = 0.10
 START_BAL = 100.0
 
@@ -79,9 +80,10 @@ def fetch_price(sym):
 class SymbolState:
     """Holds all live state for a single symbol."""
 
-    def __init__(self, symbol):
+    def __init__(self, symbol, min_diff=0.0):
         self.symbol = symbol
         self.pip = fetch_pip(symbol)
+        self.min_diff = min_diff
 
         # Candle builder
         self.current_candle = None
@@ -208,6 +210,8 @@ class SymbolState:
                                       p2["val"] + dist, dist, p4)
 
     def _emit_signal(self, d, entry, sl, tp, dist, p4):
+        if dist < self.min_diff:
+            return
         if self.current_atr and self.current_atr > 0:
             ap = self.current_atr / self.pip
             dp = dist / self.pip
@@ -427,6 +431,8 @@ def main():
             SWING_WINDOW = int(sys.argv[i + 1]); i += 2
         elif a == "--atr-period" and i + 1 < len(sys.argv):
             ATR_PERIOD = int(sys.argv[i + 1]); i += 2
+        elif a == "--min-diff" and i + 1 < len(sys.argv):
+            MIN_DIFF = float(sys.argv[i + 1]); i += 2
         elif a == "--start" and i + 1 < len(sys.argv):
             START_BAL = float(sys.argv[i + 1]); balance = START_BAL; i += 2
         else:
@@ -435,7 +441,7 @@ def main():
     signal.signal(signal.SIGINT, handle_sigint)
 
     # Init symbol states
-    states = [SymbolState(sym) for sym in symbols]
+    states = [SymbolState(sym, min_diff=MIN_DIFF) for sym in symbols]
 
 
 
@@ -443,7 +449,7 @@ def main():
     print(f"  MEXC 1s Multi-Asset Swing Trader")
     print(f"  Symbols: {', '.join(symbols)}")
     print(f"  Start: ${START_BAL:.2f}  Risk: {RISK * 100:.0f}%  "
-          f"Threshold: {ATR_THRESH}x  Window: {SWING_WINDOW}s")
+          f"Threshold: {ATR_THRESH}x  Window: {SWING_WINDOW}s  MinDiff: ${MIN_DIFF:.0f}")
     print("=" * 80)
     print(f"  {'Time':<15} {'Bal':<10} {'Stats':<50}")
     print("-" * 80)
