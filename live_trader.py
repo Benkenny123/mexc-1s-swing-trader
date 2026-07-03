@@ -18,6 +18,7 @@ import signal
 import math
 import os
 import threading
+import http.server
 from datetime import datetime, timezone
 from collections import deque
 
@@ -411,8 +412,63 @@ def print_footer(states, start_time, poll_count):
     print()
 
 
+
+# ─── HTTP Status Server ─────────────────────────────────────────
+
+def start_status_server_thread():
+    """Minimal HTTP server on $PORT (Render) or 8080."""
+    import json, socketserver
+    from http.server import BaseHTTPRequestHandler
+    port = int(os.environ.get("PORT", "8080"))
+    class H(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path in ("/status", "/"):
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                import __main__ as m
+                stats = m.compute_stats()
+                syms = []
+                for s in m._all_states:
+                    syms.append({
+                        "symbol": s.symbol, "pip": s.pip,
+                        "candles": s.candle_counter, "signals": s.signal_count,
+                        "active": s.active_trade is not None,
+                        "in_trade": {
+                            "dir": s.active_trade["dir"],
+                            "entry": s.active_trade["entry"],
+                            "tp": s.active_trade["tp"],
+                            "sl": s.active_trade["sl"],
+                            "dist_pips": s.active_trade["dist_pips"],
+                            "atr_pips": s.active_trade["atr_pips"],
+                            "dist_atr": s.active_trade["dist_atr"],
+                        } if s.active_trade else None,
+                    })
+                body = json.dumps({
+                    "status": "running",
+                    "balance": m.balance,
+                    "start_balance": m.START_BAL,
+                    "growth_pct": (m.balance / m.START_BAL - 1) * 100 if m.START_BAL > 0 else 0,
+                    "trades": stats["trades"],
+                    "win_rate": round(stats["wr"], 1),
+                    "sharpe": round(stats["sharpe"], 2),
+                    "symbols": syms,
+                })
+                self.wfile.write(body.encode())
+            else:
+                self.send_response(404); self.end_headers()
+        def log_message(self, *a): pass
+    try:
+        with socketserver.TCPServer(("0.0.0.0", port), H) as srv:
+            print(f"  HTTP status on :{port}")
+            srv.serve_forever()
+    except OSError as e:
+        print(f"  [HTTP server] {e}", file=sys.stderr)
+
+
 def main():
-    global running, SYMBOLS, PIP, ATR_THRESH, RISK, SWING_WINDOW, ATR_PERIOD, START_BAL, balance, MIN_DIFF, _all_states, MIN_DIFF
+    global running, SYMBOLS, PIP, ATR_THRESH, RISK, SWING_WINDOW, ATR_PERIOD, START_BAL, balance, MIN_DIFF, _all_states
 
     if len(sys.argv) < 2:
         print(f"Usage: {sys.argv[0]} SYMBOL1 [SYMBOL2 ...] [options]")
@@ -446,6 +502,12 @@ def main():
 
     # Init symbol states
     states = [SymbolState(sym, min_diff=MIN_DIFF) for sym in symbols]
+
+    # Start HTTP status server thread
+    global _all_states
+    _all_states = states
+    t = threading.Thread(target=start_status_server_thread, daemon=True)
+    t.start()
 
 
 
