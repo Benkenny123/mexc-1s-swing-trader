@@ -274,11 +274,11 @@ class SymbolState:
                     sig["_seen_below"] = True
                 filled = sig.get("_seen_below") and price >= sig["entry"]
 
-            # Blown: price hit SL before limit filled
-            blown = (d == "sell" and price >= sig["sl"]) or \
-                    (d == "buy" and price <= sig["sl"])
-            if blown:
+            # Cancel if TP hit before limit fills (move already happened)
+            if (d == "sell" and price <= sig["tp"]) or \
+               (d == "buy" and price >= sig["tp"]):
                 continue
+
             if filled:
                 # LIMIT ORDER: fill at exact pivot entry, use signal's TP/SL
                 self.active_trade = {
@@ -289,12 +289,6 @@ class SymbolState:
                     "symbol": sig["symbol"], "open_time": now_ts(),
                 }
                 log_entry(sig, sig["entry"])
-                # Check if TP hit immediately at fill
-                if (d == "sell" and price <= sig["tp"]) or \
-                   (d == "buy" and price >= sig["tp"]):
-                    self.pending_signals = still
-                    close_trade(self, "win", sig["tp"])
-                    return True
                 self.pending_signals = still
                 return False
             still.append(sig)
