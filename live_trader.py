@@ -265,19 +265,27 @@ class SymbolState:
             if blown:
                 continue
             if filled:
+                # Recalc TP/SL around the fill price so 1:1 RR is maintained
+                _dist = sig["dist"]
+                if sig["dir"] == "sell":
+                    _tp = price - _dist
+                    _sl = price + _dist
+                else:
+                    _tp = price + _dist
+                    _sl = price - _dist
                 self.active_trade = {
                     "dir": sig["dir"], "entry": price,
-                    "tp": sig["tp"], "sl": sig["sl"],
+                    "tp": _tp, "sl": _sl,
                     "dist": sig["dist"], "dist_pips": sig["dist_pips"],
                     "atr_pips": sig["atr_pips"], "dist_atr": sig["dist_atr"],
                     "symbol": sig["symbol"], "open_time": now_ts(),
                 }
                 log_entry(sig, price)
                 # Check if TP hit immediately at fill
-                if (d == "sell" and price <= sig["tp"]) or \
-                   (d == "buy" and price >= sig["tp"]):
+                if (d == "sell" and price <= _tp) or \
+                   (d == "buy" and price >= _tp):
                     self.pending_signals = still
-                    close_trade(self, "win", sig["tp"])
+                    close_trade(self, "win", _tp)
                     return True
                 self.pending_signals = still
                 return False
