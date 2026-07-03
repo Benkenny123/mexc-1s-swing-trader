@@ -361,16 +361,13 @@ def log_exit(t):
 
 
 def print_status():
-    """Print current status with live stats."""
+    """Print current status with live WR, Sharpe, Growth."""
     stats = compute_stats()
-    s = f"  [{fmt_dt(now_ts())}]"
-    s += f"  Bal=${balance:<8.2f}"
-    s += f"  Trades={stats['trades']:>3d}"
-    s += f"  WR={stats['wr']:>5.1f}%"
-    s += f"  Sharpe={stats['sharpe']:>5.1f}"
-    s += f"  Candles={candle_counter}"
+    growth = (balance / START_BAL - 1) * 100
+    s = "  [{}]  ${:<8.2f}  {:>3d}tr  {:>5.1f}%  Sharpe={:>5.1f}  Growth={:+7.2f}%  {}c  ".format(
+        fmt_dt(now_ts()), balance, stats["trades"], stats["wr"], stats["sharpe"], growth, candle_counter)
     if current_atr:
-        s += f"  ATR={current_atr / PIP:.1f}p"
+        s += "ATR={:.1f}p".format(current_atr / PIP)
     print(s)
 
 
@@ -427,7 +424,7 @@ def main():
     print(f"  Start: ${START_BAL:.2f}  Risk: {RISK * 100:.0f}%  "
           f"Threshold: {ATR_THRESH}x  Window: {SWING_WINDOW}s")
     print("=" * 80)
-    print(f"  {'Time':<15} {'Bal':<10} {'Trades':<8} {'WR':<8} {'Sharpe':<8} {'Candles':<8} {'ATR':<8}")
+    print(f"  {'Time':<15} {'Bal':<10} {'Trades':<8} {'WR':<8} {'Sharpe':<8} {'Growth':<10} {'Candles':<8} {'ATR':<8}")
     print("-" * 80)
 
     poll_count = 0
