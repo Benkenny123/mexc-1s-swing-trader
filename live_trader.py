@@ -102,6 +102,7 @@ class SymbolState:
         self.pending_signals = []
         self.signal_count = 0
         self.active_trade = None
+        self._emitted_sigs = set()  # one-shot: never re-emit same dir+entry
 
     # ── Candle builder ──
 
@@ -213,21 +214,23 @@ class SymbolState:
     def _emit_signal(self, d, entry, sl, tp, dist, p4):
         if dist < self.min_diff:
             return
+        # One-shot: never re-emit the same dir + entry level
+        key = (d, round(entry, 2))
+        if key in self._emitted_sigs:
+            return
         if self.current_atr and self.current_atr > 0:
             ap = self.current_atr / self.pip
             dp = dist / self.pip
             if dp / ap >= ATR_THRESH:
+                self._emitted_sigs.add(key)
                 sig = {
                     "entry": entry, "sl": sl, "tp": tp, "dist": dist,
                     "dir": d, "atr_pips": ap, "dist_pips": dp,
                     "dist_atr": dp / ap, "symbol": self.symbol,
                 }
-                # Dedup: skip if same dir+entry already pending
-                exists = any(s["dir"] == d and abs(s["entry"] - entry) < 0.001 for s in self.pending_signals)
-                if not exists:
-                    self.pending_signals.append(sig)
-                    self.signal_count += 1
-                    log_signal(sig)
+                self.pending_signals.append(sig)
+                self.signal_count += 1
+                log_signal(sig)
 
     # ── Position check ──
 
@@ -440,10 +443,9 @@ def start_status_server_thread():
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Access-Control-Allow-Origin", "*")
                 self.end_headers()
-                import __main__ as m
-                stats = m.compute_stats()
+                stats = compute_stats()
                 syms = []
-                for s in m._all_states:
+                for s in _all_states:
                     syms.append({
                         "symbol": s.symbol, "pip": s.pip,
                         "candles": s.candle_counter, "signals": s.signal_count,
@@ -460,9 +462,9 @@ def start_status_server_thread():
                     })
                 body = json.dumps({
                     "status": "running",
-                    "balance": m.balance,
-                    "start_balance": m.START_BAL,
-                    "growth_pct": (m.balance / m.START_BAL - 1) * 100 if m.START_BAL > 0 else 0,
+                    "balance": balance,
+                    "start_balance": START_BAL,
+                    "growth_pct": (balance / START_BAL - 1) * 100 if START_BAL > 0 else 0,
                     "trades": stats["trades"],
                     "win_rate": round(stats["wr"], 1),
                     "sharpe": round(stats["sharpe"], 2),
