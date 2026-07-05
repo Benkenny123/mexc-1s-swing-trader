@@ -4,8 +4,8 @@ Mirror Trader — mirrors the main swing trader in opposite direction.
 
 No strategy logic. Reads the main bot's HTTP status endpoint and
 mirrors every trade: when main buys, mirror sells and vice versa.
-When the main trade closes, the mirror trade closes immediately
-at the current market price.
+Mirror PnL directly from main's balance change — if main wins,
+mirror loses by the same amount.
 """
 
 import requests
@@ -13,7 +13,6 @@ import time
 import sys
 import signal
 import json
-import math
 from datetime import datetime, timezone
 
 MAIN_URL = "http://localhost:8080/status"
@@ -34,17 +33,7 @@ def fmt_dt(ms):
     return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%H:%M:%S.%f")[:-3]
 
 
-def fetch_price(sym):
-    try:
-        r = requests.get(MEXC_API, params={"symbol": sym}, timeout=5)
-        r.raise_for_status()
-        return float(r.json()["price"])
-    except Exception:
-        return None
-
-
 def get_main_status():
-    """Fetch the main bot's status. Returns None on failure."""
     try:
         r = requests.get(MAIN_URL, timeout=3)
         r.raise_for_status()
@@ -54,55 +43,45 @@ def get_main_status():
 
 
 class MirrorState:
-    """Tracks mirror positions for one symbol."""
-
     def __init__(self, symbol):
         self.symbol = symbol
-        self.active = None  # { "dir": "buy"/"sell", "entry": price, "open_time": ms }
+        self.active = None  # {"dir": "buy"/"sell", "entry": price, "open_time": ms}
 
-    def open_opposite(self, main_dir):
-        """Open mirror position opposite to main bot's trade."""
-        price = fetch_price(self.symbol)
-        if price is None:
-            return False
+    def open_opposite(self, main_dir, main_entry):
+        """Open mirror position opposite to main. Use main's entry price."""
         mirror_dir = "sell" if main_dir == "buy" else "buy"
         self.active = {
             "dir": mirror_dir,
-            "entry": price,
+            "entry": main_entry,  # Mirror at main's entry price
             "open_time": now_ts(),
+            "main_dir": main_dir,
         }
-        print(f"  🪞 {fmt_dt(now_ts())} {self.symbol:>10s} MIRROR {mirror_dir:>5s} @ {price:.2f}  "
+        print(f"  🪞 {fmt_dt(now_ts())} {self.symbol:>10s} MIRROR {mirror_dir:>5s} @ {main_entry:.2f}  "
               f"(main was {main_dir})")
         return True
 
-    def close(self):
-        """Close mirror position at current market price."""
+    def close_with_result(self, main_won):
+        """Close mirror knowing main's result. Mirror result = opposite."""
         global balance, trades_log
         if not self.active:
             return
-        price = fetch_price(self.symbol)
-        if price is None:
-            return
         t = self.active
-        # Mirror PnL: opposite direction logic
-        if t["dir"] == "buy":
-            pnl_pct = (price / t["entry"] - 1)
-        else:
-            pnl_pct = (t["entry"] / price - 1)
-        pnl = balance * RISK * (1 if pnl_pct > 0 else -1)
+
+        # Mirror result is opposite of main
+        mirror_won = not main_won
+        result = "win" if mirror_won else "loss"
+        pnl = balance * RISK * (1 if mirror_won else -1)
         balance += pnl
 
-        result = "win" if pnl > 0 else "loss"
         duration = (now_ts() - t["open_time"]) / 1000
-        icon = "✅" if result == "win" else "❌"
+        icon = "✅" if mirror_won else "❌"
         print(f"  {icon} {fmt_dt(now_ts())} {self.symbol:>10s} MIRROR EXIT {t['dir']:>5s}  "
-              f"${t['entry']:.2f} -> ${price:.2f}  "
-              f"PnL={pnl:+.2f} ({pnl_pct*100:+.2f}%)  Bal=${balance:.2f}  held={duration:.0f}s")
+              f"@ {t['entry']:.2f}  PnL={pnl:+.2f} ({'main won' if main_won else 'main lost'})  "
+              f"Bal=${balance:.2f}  held={duration:.0f}s")
         trades_log.append({
             "symbol": self.symbol, "dir": t["dir"],
-            "entry": t["entry"], "exit": price,
-            "result": result, "pnl": pnl,
-            "pnl_pct": pnl_pct * 100, "duration_s": duration,
+            "entry": t["entry"], "result": result,
+            "pnl": pnl, "duration_s": duration,
         })
         self.active = None
 
@@ -122,13 +101,15 @@ def main():
 
     print("=" * 70)
     print("  MIRROR TRADER — opposes main swing bot")
-    print("  No strategy — mirrors every trade in opposite direction")
+    print("  Mirrors PnL from main's balance changes")
     print(f"  Start: ${START_BAL:.2f}  Risk: {RISK*100:.0f}%")
     print(f"  Main:  {MAIN_URL}")
     print("=" * 70)
 
-    mirrors = {}  # symbol -> MirrorState
+    mirrors = {}
     last_print = 0
+    prev_main_bal = None
+    prev_main_active = {}  # symbol -> {"dir": str, "entry": float}
 
     while running:
         status = get_main_status()
@@ -141,35 +122,45 @@ def main():
             time.sleep(1)
             continue
 
-        # Get main bot's active trades per symbol
-        main_active = {}
+        main_bal = status.get("balance", 0)
+        if prev_main_bal is None:
+            prev_main_bal = main_bal
+
+        # Current main active trades
+        current_active = {}
         for s in status.get("symbols", []):
             sym = s["symbol"]
             if s.get("active") and s.get("in_trade"):
-                main_active[sym] = s["in_trade"]["dir"]
+                current_active[sym] = {
+                    "dir": s["in_trade"]["dir"],
+                    "entry": s["in_trade"]["entry"],
+                }
 
-        # Ensure mirror state exists for each symbol
-        for sym in status.get("symbols", []):
-            sn = sym["symbol"]
+        # Ensure mirror state exists
+        for s in status.get("symbols", []):
+            sn = s["symbol"]
             if sn not in mirrors:
                 mirrors[sn] = MirrorState(sn)
 
-        # Open/close mirrors based on main bot's state
-        for sym, mirror in list(mirrors.items()):
-            if sym in main_active:
-                # Main has an active trade
-                main_dir = main_active[sym]
-                if mirror.active is None:
-                    # No mirror yet — open opposite
-                    mirror.open_opposite(main_dir)
-                elif mirror.active["dir"] == main_dir:
-                    # Mirror has same direction as main (shouldn't happen) — close and re-open
-                    mirror.close()
-                    mirror.open_opposite(main_dir)
-            else:
-                # Main has no active trade — close mirror if open
-                if mirror.active is not None:
-                    mirror.close()
+        # Detect new trades opened and trades closed
+        for sym, mirror in mirrors.items():
+            was_active = sym in prev_main_active
+            is_active = sym in current_active
+
+            if is_active and not was_active:
+                # Main just opened a trade — open opposite mirror
+                main_dir = current_active[sym]["dir"]
+                main_entry = current_active[sym]["entry"]
+                mirror.open_opposite(main_dir, main_entry)
+
+            elif was_active and not is_active:
+                # Main just closed a trade — close mirror with opposite result
+                # Determine result: if main balance went down, main lost
+                main_won = main_bal > prev_main_bal
+                mirror.close_with_result(main_won)
+
+        prev_main_active = current_active
+        prev_main_bal = main_bal
 
         # Print status every 10s
         if ts - last_print > 10000:
@@ -181,12 +172,13 @@ def main():
                      f"Growth={growth:+7.2f}%"]
             for m in mirrors.values():
                 parts.append(m.summary())
+            # Show main bot balance for comparison
+            parts.append(f"MainBal=${main_bal:.2f}")
             print("  ".join(parts))
             last_print = ts
 
         time.sleep(1)
 
-    # Summary
     n = len(trades_log)
     wins = sum(1 for t in trades_log if t["result"] == "win")
     wr = wins / n * 100 if n else 0.0
